@@ -26,4 +26,4 @@ export {
     getUserTweets,
     updateTweet,
     deleteTweet
-}
+ }

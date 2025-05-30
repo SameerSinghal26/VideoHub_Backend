@@ -6,7 +6,7 @@ const playlistSchema = new Schema(
             type : String,
             required : true
         },
-        onwer : {
+        owner : {
             type : Schema.Types.ObjectId,
             ref : "User"
         },

@@ -2,7 +2,7 @@ import mongoose, {Schema} from "mongoose";
 
 const tweetSchema = new Schema(
     {
-        onwer : {
+        owner : {
             type : Schema.Types.ObjectId,
             ref : "User"
         },
