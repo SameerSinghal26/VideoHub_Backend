@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
 import {User} from "../models/user.model.js"
 import { Subscription } from "../models/subscription.model.js"
+import { Video } from "../models/video.model.js"
 import {ApiError} from "../utils/ApiError.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 import {asyncHandler} from "../utils/asyncHandler.js"
@@ -114,6 +115,7 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
                             fullName : 1,
                             username : 1,
                             avatar : 1,
+                            bio : 1,
                             isSubscribed : 1,
                         }
                     }
@@ -122,27 +124,79 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
         },
         {
             $addFields : {
-                subscribedTo : {
-                    $first : "$subscribedTo"
+                subscribedTo : { $first : "$subscribedTo" },
+                subscriptionDate: "$createdAt"  // Preserve the subscription date
+            }
+        },
+        {
+            $lookup: {
+                from: "subscriptions",
+                let: { channelId: "$channel" },
+                pipeline: [
+                    { $match: { $expr: { $eq: ["$channel", "$$channelId"] } } },
+                    { $count: "count" }
+                ],
+                as: "subscriberCountArr"
+            }
+        },
+        {
+            $addFields: {
+                "subscribedTo.subscriberCount": {
+                    $ifNull: [{ $arrayElemAt: ["$subscriberCountArr.count", 0] }, 0]
+                }
+            }
+        },
+        {
+            $replaceRoot: { 
+                newRoot: {
+                    $mergeObjects: ["$subscribedTo", { subscriptionDate: "$subscriptionDate" }]
                 }
             }
         },
         {
             $sort : {
-                createdAt : -1 // Sort by subscription date
+                "subscriptionDate" : -1
             }
         }
     ])
 
-    const channelList = userChannels.map(i => i.subscribedTo)
-
     return res
     .status(200)
-    .json(new ApiResponse(200, channelList, "Subscribed channels fetched Successfully"))
+    .json(new ApiResponse(200, userChannels, "Subscribed channels fetched Successfully"))
 })
+
+// controller to get videos from subscribed channels
+const getSubscribedChannelsVideos = asyncHandler(async (req, res) => {
+    const userId = req.user?._id;
+
+    if (!userId) {
+        throw new ApiError(401, "User not authenticated");
+    }
+
+    // Get all channels the user has subscribed to
+    const subscriptions = await Subscription.find({ subscriber: userId });
+    const channelIds = subscriptions.map(sub => sub.channel);
+
+    // Get all videos from these channels
+    const videos = await Video.find({
+        owner: { $in: channelIds }
+    })
+    .populate({
+        path: "owner",
+        select: "username avatar"
+    })
+    .sort({ createdAt: -1 }); // Sort by newest first
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(200, videos, "Subscribed channels videos fetched successfully")
+        );
+});
 
 export {
     toggleSubscription,
     getUserChannelSubscribers,
-    getSubscribedChannels
- }
+    getSubscribedChannels,
+    getSubscribedChannelsVideos
+}

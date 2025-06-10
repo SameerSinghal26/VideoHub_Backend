@@ -9,10 +9,12 @@ app.use(cors({
     credentials: true
 }))
 
-app.use(express.json({limit : "16kb"}))
-app.use(express.urlencoded({extended : true, limit : "16kb"}))
-app.use(express.static("public"))
 app.use(cookieParser())
+
+
+app.use(express.json({limit: "50mb"}))
+app.use(express.urlencoded({extended: true, limit: "50mb"}))
+app.use(express.static("public"))
 
 
 // routes import
@@ -25,6 +27,7 @@ import commentRouter from "./routes/comment.routes.js"
 import likeRouter from "./routes/like.routes.js"
 import playlistRouter from "./routes/playlist.routes.js"
 import dashboardRouter from "./routes/dashboard.routes.js"
+import searchRouter from "./routes/search.routes.js"
 
 
 // router declaration
@@ -36,6 +39,7 @@ app.use("/api/v1/comments", commentRouter)
 app.use("/api/v1/likes", likeRouter)
 app.use("/api/v1/playlist", playlistRouter)
 app.use("/api/v1/dashboard", dashboardRouter)
+app.use("/api/v1/search", searchRouter)
 
 // http://localhost:8080/api/v1/users/register
 

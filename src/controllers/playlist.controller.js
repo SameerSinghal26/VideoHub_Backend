@@ -4,6 +4,7 @@ import {ApiError} from "../utils/ApiError.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 import {asyncHandler} from "../utils/asyncHandler.js"
 import {Video} from "../models/video.model.js"
+import {Like} from "../models/like.model.js"
 
 
 const createPlaylist = asyncHandler(async (req, res) => {
@@ -11,7 +12,7 @@ const createPlaylist = asyncHandler(async (req, res) => {
 
     //TODO: create playlist
 
-    const checkPlaylist = await Playlist.findOne({ name, description })
+    const checkPlaylist = await Playlist.findOne({ name })
     if (checkPlaylist) {
         throw new ApiError(400, "Playlist with this name is already available")
     }
@@ -46,102 +47,25 @@ const createPlaylist = asyncHandler(async (req, res) => {
 
 const getUserPlaylists = asyncHandler(async (req, res) => {
     const {userId} = req.params
-    //TODO: get user playlists
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
         throw new ApiError(401, "Invalid User Id")
     }
 
-    const userPlaylist = await Playlist.aggregate(
-        [
-            //for owner of playlist
-            {
-                $match: {
-                    owner: new mongoose.Types.ObjectId(userId)
-                }
-            },
-            {
-                $lookup: {
-                    from: "users",
-                    localField: "owner",
-                    foreignField: "_id",
-                    as: "owner",
-                    pipeline: [
-                        {
-                            $project: {
-                                _id: 1,
-                                username: 1,
-                                fullname: 1,
-                                avatar: 1
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                $addFields: {
-                    owner: {
-                        $first: "$owner"
-                    }
-                }
-            },
-            //for videos of playlist
-            {
-                $lookup: {
-                    from: "videos",
-                    localField: "videos",
-                    foreignField: "_id",
-                    as: "videos",
-                    pipeline: [
-                        {
-                            $project: {
-                                _id: 1,
-                                video: 1,
-                                thumbnail: 1,
-                                title: 1,
-                                views: 1,
-                                owner: 1
-                            }
-                        },
-                        //for owner of videos
-                        {
-                            $lookup: {
-                                from: "users",
-                                localField: "owner",
-                                foreignField: "_id",
-                                as: "owner",
-                                pipeline: [
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            username: 1,
-                                            fullname: 1,
-                                            avatar: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        {
-                            $addFields: {
-                                owner: {
-                                    $first: "$owner"
-                                }
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                $addFields: {
-                    videos: {
-                        $first: "$videos"
-                    }
-                }
+    const userPlaylist = await Playlist.find({ owner: userId })
+        .populate({
+            path: "owner",
+            select: "_id username fullName avatar"
+        })
+        .populate({
+            path: "videos",
+            select: "_id video thumbnail title description duration views owner",
+            populate: {
+                path: "owner",
+                select: "_id username fullname avatar"
             }
-
-        ]
-    )
+        })
+        .sort({ updatedAt: -1, createdAt: -1 });
 
     return res
         .status(200)
@@ -152,23 +76,33 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
 
 const getPlaylistById = asyncHandler(async (req, res) => {
     const {playlistId} = req.params
-    //TODO: get playlist by id
     
     if(!playlistId){
         throw new ApiError(400, "playlistId is required")
     }
 
-    const playlist = await Playlist.findById(playlistId).populate({
-        path: "videos",
-        select: "thumbnail title owner",
-        populate: {
-            path: "owner",
-            select: "username avatar"
-        }
-    });
+    const playlist = await Playlist.findById(playlistId)
+        .populate({
+            path: "videos",
+            select: "thumbnail title description duration views owner updatedAt createdAt",
+            populate: {
+                path: "owner",
+                select: "username avatar"
+            }
+        })
+        .sort({ updatedAt: -1, createdAt: -1 });
 
     if(!playlist){
         throw new ApiError(404, "playlistId is not found")
+    }
+
+    // Sort the videos array by updatedAt and createdAt
+    if (playlist.videos) {
+        playlist.videos.sort((a, b) => {
+            const dateA = new Date(a.updatedAt || a.createdAt);
+            const dateB = new Date(b.updatedAt || b.createdAt);
+            return dateB - dateA;
+        });
     }
 
     return res
@@ -197,10 +131,25 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
         throw new ApiError(404, "playlistId is not found")
     }
 
+    // First remove the video if it exists (to avoid duplicates)
+    await Playlist.findByIdAndUpdate(playlistId,
+        {
+            $pull: {
+                videos: videoId
+            }
+        }
+    );
+
+    // Then add it to the beginning of the array
     const updatedPlaylist = await Playlist.findByIdAndUpdate(playlistId,
         {
-            $addToSet: {
-                videos: videoId
+            $push: {
+                videos: {
+                    $each: [videoId],
+                }
+            },
+            $set: {
+                updatedAt: new Date()
             }
         },
         {
@@ -221,7 +170,7 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
 const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
     const {playlistId, videoId} = req.params
     // TODO: remove video from playlist
-    if (!(playlistId || video)) {
+    if (!(playlistId || videoId)) {
         throw new ApiError(400, "playlistId and videoId is required")
     }
 
@@ -237,9 +186,17 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
         throw new ApiError(404, "playlistId is not found")
     }
 
+    // If this is the 'Liked Videos' playlist, also remove the like for this video by the owner
+    if (playlist.name === "Liked Videos") {
+        await Like.deleteMany({
+            likedBy: playlist.owner,
+            video: videoId
+        });
+    }
+
     const updatedPlaylist = await Playlist.findByIdAndUpdate(playlistId,
         {
-            $unset: {
+            $pull: {
                 videos: videoId
             }
         },
@@ -267,6 +224,14 @@ const deletePlaylist = asyncHandler(async (req, res) => {
     }
 
     const userPlaylist = await Playlist.findById(playlistId)
+
+    if (userPlaylist.name === "Liked Videos") {
+        // Remove all likes for this user for videos in this playlist
+        await Like.deleteMany({
+            likedBy: userPlaylist.owner,
+            video: { $in: userPlaylist.videos }
+        });
+    }
 
     const playlistDelete = await Playlist.deleteOne({ name: userPlaylist.name, description: userPlaylist.description })
 
@@ -318,40 +283,6 @@ const updatePlaylist = asyncHandler(async (req, res) => {
         )
 })
 
-const getLikedVideosPlaylist = asyncHandler(async (req, res) => {
-    const userId = req.user?._id;
-
-    if (!userId) {
-        throw new ApiError(401, "User not authenticated");
-    }
-
-    const likedVideosPlaylist = await Playlist.findOne({
-        owner: userId,
-        name: "Liked Videos"
-    }).populate({
-        path: "videos",
-        select: "thumbnail title owner",
-        populate: {
-            path: "owner",
-            select: "username avatar"
-        }
-    });
-
-    if (!likedVideosPlaylist) {
-        return res
-        .status(200)
-        .json(
-            new ApiResponse(200, null, "No liked videos playlist found")
-        );
-    }
-
-    return res
-    .status(200)
-    .json(
-        new ApiResponse(200, likedVideosPlaylist, "Liked videos playlist found successfully")
-    );
-});
-
 export {
     createPlaylist,
     getUserPlaylists,
@@ -360,5 +291,4 @@ export {
     removeVideoFromPlaylist,
     deletePlaylist,
     updatePlaylist,
-    getLikedVideosPlaylist
 }

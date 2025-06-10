@@ -32,7 +32,6 @@ const userSchema = new Schema(
         },
         avatar : {
             type : String, // cloudinary sevier we are using 
-            required : true,
 
         },
         coverImage : {

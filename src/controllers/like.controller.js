@@ -48,7 +48,7 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
         return res
             .status(200)
             .json(
-                new ApiResponse(200, { isLiked: false }, "Video unliked successfully")
+                new ApiResponse(200, { isLiked: false, totalLikes: video.totalLikes - 1 }, "Video unliked successfully")
             );
     }
 
@@ -85,7 +85,7 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
     return res
         .status(200)
         .json(
-            new ApiResponse(200, { isLiked: true }, "Video liked successfully")
+            new ApiResponse(200, { isLiked: true, totalLikes: video.totalLikes + 1 }, "Video liked successfully")
         );
 });
 
@@ -154,22 +154,29 @@ const getLikedVideos = asyncHandler(async (req, res) => {
         })
         .populate({
             path: "video",
-            select: "videoFile thumbnail title description duration view owner createdAt",
+            select: "videoFile thumbnail title description duration view owner updatedAt createdAt",
             populate: {
                 path: "owner",
                 select: "username fullName avatar"
             }
-        });
-        
+        })
+        .sort({ updatedAt: -1, createdAt: -1 });
+
         if(!likedVideos || likedVideos.length === 0){
             return res
             .status(200)
             .json(new ApiResponse(200, [], "No liked videos found"));
         }
 
-        // Transform the response to only include video data
-        const videos = likedVideos.map(like => like.video);
-
+        // Add totalLikes to each video
+        const videos = await Promise.all(
+          likedVideos.map(async (like) => {
+            const video = like.video.toObject();
+            video.totalLikes = await Like.countDocuments({ video: video._id });
+            return video;
+          })
+        );
+        
         return res
         .status(200)
         .json(new ApiResponse(200, videos, "Liked videos fetched Successfully"));
@@ -178,9 +185,72 @@ const getLikedVideos = asyncHandler(async (req, res) => {
     }
 })
 
+const checkVideoLike = asyncHandler(async (req, res) => {
+    const { videoId } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) {
+        throw new ApiError(401, "User not authenticated");
+    }
+
+    const existingLike = await Like.findOne({
+        video: videoId,
+        likedBy: userId
+    });
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(200, { isLiked: !!existingLike }, "Video like status fetched successfully")
+        );
+});
+
+const checkCommentLike = asyncHandler(async (req, res) => {
+    const { commentId } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) {
+        throw new ApiError(401, "User not authenticated");
+    }
+
+    const existingLike = await Like.findOne({
+        comment: commentId,
+        likedBy: userId
+    });
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(200, { isLiked: !!existingLike }, "Comment like status fetched successfully")
+        );
+});
+
+const checkTweetLike = asyncHandler(async (req, res) => {
+    const { tweetId } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) {
+        throw new ApiError(401, "User not authenticated");
+    }
+
+    const existingLike = await Like.findOne({
+        tweet: tweetId,
+        likedBy: userId
+    });
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(200, { isLiked: !!existingLike }, "Tweet like status fetched successfully")
+        );
+});
+
 export {
     toggleCommentLike,
     toggleTweetLike,
     toggleVideoLike,
-    getLikedVideos
+    getLikedVideos,
+    checkVideoLike,
+    checkCommentLike,
+    checkTweetLike
 }

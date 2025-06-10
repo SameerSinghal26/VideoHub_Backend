@@ -5,6 +5,9 @@ import {uploadOnCloudinary, deleteFromCloudinary} from "../utils/cloudinary.js"
 import { ApiResponse } from "../utils/ApiResponse.js"
 import jwt from "jsonwebtoken"
 import mongoose from "mongoose"
+import { Video } from "../models/video.model.js"
+import { Playlist } from "../models/playlist.model.js"
+import {createPlaylist, getUserPlaylists} from "./playlist.controller.js"
 
 const generateAccessAndRefreshTokens = async(userId) =>{
     try {
@@ -27,10 +30,6 @@ const registerUser = asyncHandler( async (req, res) => {
     const {fullName, email, username, password, bio} = req.body
     
     // validation - not empty
-
-    // if(fullName === ""){ basic code
-    //     throw new ApiError(400,"fullName is required")
-    // }
     if (
         [fullName, email, username, password].some((field) => field?.trim() === "")
     ) {
@@ -45,66 +44,54 @@ const registerUser = asyncHandler( async (req, res) => {
         throw  new ApiError(409, "User already exits!!!")
     }
 
-    // check for images, avatar
-    const avatarLocalPath = req.files?.avatar[0]?.path;
+    let avatarLocalPath;
+    if (req.files && Array.isArray(req.files.avatar) && req.files.avatar.length > 0) {
+        avatarLocalPath = req.files.avatar[0].path;
+    }
 
     let coverImageLocalPath;
     if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
         coverImageLocalPath = req.files.coverImage[0].path
     }
 
-    if(!avatarLocalPath){
-        throw new ApiError(400, "Avatar is required");
-    }
 
     // upload them to cloudinary , avatar
     const avatar = await uploadOnCloudinary(avatarLocalPath);
+    // upload cover image if provided
     const coverImage = await uploadOnCloudinary(coverImageLocalPath);
     
-    if (!avatar) {
-        throw new ApiError(400, "Avatar file is required");
-    }
 
-    // create user object- entey in db
+    // create user object- entry in db
     const user = await User.create({
         fullName,
-        avatar: avatar.url,
+        avatar: avatar?.url || "",
         coverImage: coverImage?.url || "",
         email, 
         password,
         username: username.toLowerCase(),
-        bio: bio || "" // Add bio field with default empty string if not provided
-    })
+        bio: bio || ""
+    });
 
-    // remove the password and refresh token from response
-
-    const createdUser = await User.findById(user._id).select("-password -refreshToken")// select method default select all the value we have to use -"field_name" to remove it from the db.
-
-    // check the user creation
-    if (!createdUser) {
-        throw new ApiError(500 , "Something went wrong while registering the user!");
-    }
+    // Get the user without sensitive data
+    const userWithoutSensitiveData = await User.findById(user._id)
+        .select("-password -refreshToken");
 
     // return response
     return res.status(201).json(
-        new ApiResponse(200, createdUser, "User Register Successfully!")
-    )
+        new ApiResponse(200, userWithoutSensitiveData, "User Register Successfully!")
+    );
 })
 
 const loginUser = asyncHandler( async(req, res) => {
-
     // req body -> data
-
     const {email, username, password } = req.body
 
     // username or eamil
-
     if(!username && !email){
         throw new ApiError(400, "username or email should be given.")
     }
 
     // find the user
-
     const user = await User.findOne({
         $or : [{username},{email}]
     })
@@ -114,27 +101,24 @@ const loginUser = asyncHandler( async(req, res) => {
     }
 
     // password check
-
     const isPasswordValid = await user.isPasswordCorrect(password)
 
     if (!isPasswordValid){
         throw new ApiError(401, "Password is incorrect!")
     }
 
+    
     // access and refresh token
-
     const {accessToken, refreshToken} = await generateAccessAndRefreshTokens(user._id)
 
     const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
 
     // send cookie
-
     const options = {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production", // Only use secure in production
         sameSite: "lax",
     }
-
 
     return res
     .status(200)
@@ -151,7 +135,7 @@ const loginUser = asyncHandler( async(req, res) => {
     )
 })
 
-const logoutUser = asyncHandler( async (req, res) => {
+const logoutUser = asyncHandler( async (req, res) => {  
     // finding user 
     const user = await User.findByIdAndUpdate(
         req.user._id,
@@ -463,64 +447,60 @@ const getWatchHistory = asyncHandler(async (req, res) => {
             throw new ApiError(400, "User ID is required");
         }
 
-        const user = await User.aggregate([
-            {
-                $match: {
-                    _id: new mongoose.Types.ObjectId(req.user._id)
-                }
-            },
-            {
-                $lookup: {
-                    from: "videos",
-                    localField: "watchHistory",
-                    foreignField: "_id",
-                    as: "watchHistory",
-                    pipeline: [
-                        {
-                            $lookup: {
-                                from: "users",
-                                localField: "owner",
-                                foreignField: "_id",
-                                as: "owner",
-                                pipeline: [
-                                    {
-                                        $project: {
-                                            fullName: 1,
-                                            username: 1,
-                                            avatar: 1,
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        {
-                            $addFields: {
-                                owner: {
-                                    $first: "$owner"
-                                }
-                            }
-                        }
-                    ]
-                }
-            }
-        ]);
-
-        // Check if user exists
-        if (!user || user.length === 0) {
+        // 1. Get the user's watchHistory array (with duplicates and order)
+        const user = await User.findById(req.user._id).select("watchHistory");
+        if (!user) {
             throw new ApiError(404, "User not found");
         }
 
-        // Check if watchHistory exists
-        const watchHistory = user[0].watchHistory || [];
+        const watchHistoryIds = user.watchHistory || [];
+        if (watchHistoryIds.length === 0) {
+            return res.status(200).json(new ApiResponse(200, [], "No watch history."));
+        }
+
+        // 2. Fetch all videos for those IDs
+        const videos = await Video.find({ _id: { $in: watchHistoryIds } })
+            .populate({
+                path: "owner",
+                select: "fullName username avatar"
+            })
+            .lean();
+
+        // 3. Map videos to the order and duplicates of watchHistoryIds
+        const videoMap = {};
+        videos.forEach(video => {
+            videoMap[video._id.toString()] = video;
+        });
+
+        const orderedHistory = watchHistoryIds.map(id => videoMap[id.toString()]).filter(Boolean);
 
         return res
             .status(200)
-            .json(new ApiResponse(200, watchHistory, "User Watch History fetched Successfully!!"));
+            .json(new ApiResponse(200, orderedHistory, "User Watch History fetched Successfully!!"));
     } catch (error) {
         // Handle specific MongoDB errors
         if (error instanceof mongoose.Error.CastError) {
             throw new ApiError(400, "Invalid user ID format");
         }
+        throw error;
+    }
+});
+
+const clearWatchHistory = asyncHandler(async (req, res) => {
+    try {
+        if (!req.user?._id) {
+            throw new ApiError(400, "User ID is required");
+        }
+        const user = await User.findByIdAndUpdate(
+            req.user._id,
+            { $set: { watchHistory: [] } },
+            { new: true }
+        );
+        if (!user) {
+            throw new ApiError(404, "User not found");
+        }
+        return res.status(200).json(new ApiResponse(200, {}, "Watch history cleared successfully!"));
+    } catch (error) {
         throw error;
     }
 });
@@ -580,6 +560,7 @@ export {
     updateUserCoverImage,
     getUserChannelProfile,
     getWatchHistory,
+    clearWatchHistory,
     updateUserBio,
     getUserById
  }

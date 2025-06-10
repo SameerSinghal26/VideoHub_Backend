@@ -11,7 +11,8 @@ import { loginUser,
         getUserChannelProfile, 
         getWatchHistory, 
         updateUserBio,
-        getUserById
+        getUserById,
+        clearWatchHistory
     } from "../controllers/user.controller.js";
 import {upload} from "../middlewares/multer.middleware.js"
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -38,7 +39,7 @@ router.route("/logout").post(verifyJWT ,logoutUser) // middleware used with next
 
 router.route("/refresh-token").post(refreshAccessToken)
 
-router.route("/change-password").post(verifyJWT, changeCurrentPassword)
+router.route("/change-password").patch(verifyJWT, changeCurrentPassword)
 
 router.route("/current-user").get(verifyJWT, getCurrentUser)
 
@@ -51,6 +52,8 @@ router.route("/cover-image").patch(verifyJWT, upload.single("coverImage"), updat
 router.route("/channel/:username").get(verifyJWT, getUserChannelProfile)
 
 router.route("/history").get(verifyJWT, getWatchHistory)
+
+router.route("/history").delete(verifyJWT, clearWatchHistory)
 
 router.route("/update-bio").patch(verifyJWT, updateUserBio)
 
