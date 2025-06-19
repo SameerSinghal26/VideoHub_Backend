@@ -32,7 +32,7 @@ router.route("/upload-video").post(verifyJWT, upload.fields([
 
 router.route('/user-video/:videoId').get(verifyJWT, getVideoById)
 
-router.route('/delete-video').delete(verifyJWT, deleteVideo)
+router.route('/delete-video/:videoId').delete(verifyJWT, deleteVideo)
 
 router.route("/update-video").patch(verifyJWT, upload.single("thumbnail"), updateVideo)
 

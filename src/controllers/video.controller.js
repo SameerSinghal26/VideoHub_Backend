@@ -4,7 +4,7 @@ import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 import { Like } from "../models/like.model.js";
 
 //done...
@@ -127,7 +127,7 @@ const updateVideo = asyncHandler(async (req, res) => {
     }
 
     try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
+      await deleteFromCloudinary(publicId, { resource_type: "video" });
     } catch (error) {
       throw new ApiError(
         400,
@@ -204,9 +204,9 @@ const deleteVideo = asyncHandler(async (req, res) => {
 
   if (publicId) {
     try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
+      await deleteFromCloudinary(publicId, { resource_type: "video" });
     } catch (error) {
-      throw new ApiError(400, "Error deleting video file from Cloudinary!");
+      throw new ApiError(400, "Error deleting video file from Cloudinary! " + error.message);
     }
   }
 
