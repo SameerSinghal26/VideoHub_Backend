@@ -2,7 +2,6 @@ import mongoose from "mongoose"
 import {Like} from "../models/like.model.js"
 import {Video} from "../models/video.model.js"
 import {Comment} from "../models/comment.model.js"
-import {Subscription} from "../models/subscription.model.js"
 import {Playlist} from "../models/playlist.model.js"
 import {ApiError} from "../utils/ApiError.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
@@ -116,34 +115,6 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
     }
 })
 
-const toggleTweetLike = asyncHandler(async (req, res) => {
-    const {tweetId} = req.params
-    //TODO: toggle like on tweet
-    try {
-        const user = req.user?._id;
-        const condition = {likedBy: user, tweet: tweetId};
-        const like = await Like.findOne(condition);
-        
-        if(!like){
-            const newLike = await Like.create({
-                tweet: tweetId,
-                likedBy: user
-            });
-            return res
-            .status(200)
-            .json(new ApiResponse(200, { newLike, isLiked: true }, "Tweet liked Successfully"));
-        }
-        else{
-            const removeLike = await Like.findOneAndDelete(like._id);
-            return res
-            .status(200)
-            .json(new ApiResponse(200, { removeLike, isLiked: false }, "Tweet unliked Successfully"));
-        }
-    } catch (error) {
-        throw new ApiError(500, "Something went wrong while toggling like on tweet");
-    }
-})
-
 const getLikedVideos = asyncHandler(async (req, res) => {
     //TODO: get all liked videos
     try {
@@ -225,32 +196,11 @@ const checkCommentLike = asyncHandler(async (req, res) => {
         );
 });
 
-const checkTweetLike = asyncHandler(async (req, res) => {
-    const { tweetId } = req.params;
-    const userId = req.user?._id;
-
-    if (!userId) {
-        throw new ApiError(401, "User not authenticated");
-    }
-
-    const existingLike = await Like.findOne({
-        tweet: tweetId,
-        likedBy: userId
-    });
-
-    return res
-        .status(200)
-        .json(
-            new ApiResponse(200, { isLiked: !!existingLike }, "Tweet like status fetched successfully")
-        );
-});
 
 export {
     toggleCommentLike,
-    toggleTweetLike,
     toggleVideoLike,
     getLikedVideos,
     checkVideoLike,
     checkCommentLike,
-    checkTweetLike
 }

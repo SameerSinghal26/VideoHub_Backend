@@ -272,42 +272,28 @@ const reactToTweet = asyncHandler(async (req, res) => {
         }
     ]);
 
-    let updateOperation;
-    if (existingReaction.length > 0) {
-        // If same reaction type, remove the reaction
-        if (existingReaction[0].reactions.type === reactionType) {
-            updateOperation = {
-                $pull: {
-                    reactions: {
-                        user: new mongoose.Types.ObjectId(req.user._id)
-                    }
-                }
-            };
-        } else {
-            // If different reaction type, update it
-            updateOperation = {
-                $set: {
-                    "reactions.$[elem].type": reactionType
-                }
-            };
-        }
-    } else {
-        // Add new reaction
-        updateOperation = {
-            $push: {
-                reactions: {
-                    user: new mongoose.Types.ObjectId(req.user._id),
-                    type: reactionType
-                }
-            }
-        };
-    }
-
-    // Update the tweet
+    // Always remove any previous reaction by this user, then add the new one
     await Tweet.updateOne(
         { _id: new mongoose.Types.ObjectId(tweetId) },
-        updateOperation
+        {
+            $pull: { reactions: { user: new mongoose.Types.ObjectId(req.user._id) } }
+        }
     );
+
+    // If the user is toggling off (same reaction), don't add a new one
+    if (!existingReaction.length || existingReaction[0].reactions.type !== reactionType) {
+        await Tweet.updateOne(
+            { _id: new mongoose.Types.ObjectId(tweetId) },
+            {
+                $push: {
+                    reactions: {
+                        user: new mongoose.Types.ObjectId(req.user._id),
+                        type: reactionType
+                    }
+                }
+            }
+        );
+    }
 
     // Get updated tweet with reactions using aggregation
     const updatedTweet = await Tweet.aggregate([
