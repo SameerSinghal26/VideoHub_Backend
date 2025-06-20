@@ -116,12 +116,15 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
 })
 
 const getLikedVideos = asyncHandler(async (req, res) => {
-    //TODO: get all liked videos
     try {
-        const user = req.user?._id;        
+        const user = req.user?._id;
+        if (!user) {
+            throw new ApiError(401, "User not authenticated");
+        }
+
         const likedVideos = await Like.find({
             likedBy: user,
-            video: { $exists: true } // Only get likes where video field exists
+            video: { $exists: true }
         })
         .populate({
             path: "video",
@@ -142,16 +145,24 @@ const getLikedVideos = asyncHandler(async (req, res) => {
         // Add totalLikes to each video
         const videos = await Promise.all(
           likedVideos.map(async (like) => {
+            if (!like.video) {
+                return null;
+            }
             const video = like.video.toObject();
             video.totalLikes = await Like.countDocuments({ video: video._id });
             return video;
           })
         );
-        
+
+        // Filter out any nulls
+        const filteredVideos = videos.filter(v => v !== null);
+
         return res
         .status(200)
-        .json(new ApiResponse(200, videos, "Liked videos fetched Successfully"));
+        .json(new ApiResponse(200, filteredVideos, "Liked videos fetched Successfully"));
     } catch (error) {
+        // Log the actual error for debugging
+        console.error("Error in getLikedVideos:", error);
         throw new ApiError(500, "Something went wrong while fetching liked videos");
     }
 })
