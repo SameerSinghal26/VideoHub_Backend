@@ -270,7 +270,7 @@ const updatePlaylist = asyncHandler(async (req, res) => {
         {
             new: true
         }
-    )
+    ).populate('owner');
 
     if (!updatedPlaylist) {
         throw new ApiError(400, "Error while updating playlist")
